@@ -61,118 +61,162 @@ const startServer = async () => {
 
 
 
+
+// Add array comparison helper
+const arraysEqual = (a, b) => {
+  if (a.length !== b.length) return false;
+  const sortedA = [...a].sort();
+  const sortedB = [...b].sort();
+  return sortedA.every((val, index) => val === sortedB[index]);
+};
+
+// ====== Firestore Endpoints ======
 app.post('/chats', async (req, res) => {
   try {
     const { participantIds, requestId } = req.body;
     
-    // Check if chat already exists
-    const chatsRef = collection(db, 'chats');
-    const q = query(chatsRef, where('participants', 'array-contains', participantIds[0]));
-    const querySnapshot = await getDocs(q);
+    // Validate input
+    if (!Array.isArray(participantIds) || participantIds.length < 2) {
+      return res.status(400).json({ error: 'Invalid participant IDs' });
+    }
 
-    let existingChat;
-    querySnapshot.forEach((doc) => {
-      const chat = doc.data();
-      if (arraysEqual(chat.participants.sort(), participantIds.sort())) {
-        existingChat = { id: doc.id, ...chat };
+    // Check for existing chat
+    const chatsRef = collection(db, 'chats');
+    const q = query(
+      chatsRef, 
+      where('participants', 'array-contains-any', participantIds)
+    );
+    
+    const snapshot = await getDocs(q);
+    let existingChat = null;
+    
+    snapshot.forEach(doc => {
+      const chatData = doc.data();
+      if (arraysEqual(chatData.participants, participantIds)) {
+        existingChat = { id: doc.id, ...chatData };
       }
     });
 
     if (existingChat) {
-      return res.status(200).json(existingChat);
+      return res.json(existingChat);
     }
 
     // Create new chat
-    const newChatRef = await addDoc(collection(db, 'chats'), {
+    const newChat = {
       participants: participantIds,
       lastMessage: '',
-      lastMessageAt: new Date(),
+      lastMessageAt: serverTimestamp(),
       requestId: requestId || null
-    });
+    };
 
-    res.status(201).json({ 
-      id: newChatRef.id,
-      participants: participantIds,
-      requestId
+    const docRef = await addDoc(collection(db, 'chats'), newChat);
+    
+    res.status(201).json({
+      id: docRef.id,
+      ...newChat
     });
 
   } catch (error) {
-    console.error('Error creating chat:', error);
-    res.status(500).json({ error: 'Failed to create chat' });
+    console.error('Chat error:', error);
+    res.status(500).json({ error: 'Failed to handle chat request' });
   }
 });
 
-// Send message
 app.post('/chats/:chatId/messages', async (req, res) => {
   try {
     const { chatId } = req.params;
     const { senderId, content } = req.body;
 
+    if (!senderId || !content) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // Add message
     const messagesRef = collection(db, 'chats', chatId, 'messages');
-    const newMessageRef = await addDoc(messagesRef, {
+    const messageData = {
       senderId,
       content,
-      timestamp: new Date(),
+      timestamp: serverTimestamp(),
       read: false
-    });
+    };
+    
+    const docRef = await addDoc(messagesRef, messageData);
 
-    // Update chat last message
+    // Update chat
     const chatRef = doc(db, 'chats', chatId);
     await updateDoc(chatRef, {
       lastMessage: content,
-      lastMessageAt: new Date()
+      lastMessageAt: serverTimestamp()
     });
 
-    res.status(201).json({
-      id: newMessageRef.id,
-      chatId,
-      senderId,
-      content,
-      timestamp: new Date().toISOString()
+    res.json({
+      id: docRef.id,
+      ...messageData,
+      timestamp: new Date().toISOString() // For client compatibility
     });
 
   } catch (error) {
-    console.error('Error sending message:', error);
+    console.error('Message error:', error);
     res.status(500).json({ error: 'Failed to send message' });
   }
 });
 
-// Get chat history
 app.get('/chats/:chatId/messages', async (req, res) => {
   try {
     const { chatId } = req.params;
     const messagesRef = collection(db, 'chats', chatId, 'messages');
-    const querySnapshot = await getDocs(query(messagesRef, orderBy('timestamp', 'desc'), limit(50)));
-    
-    const messages = querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+    const q = query(
+      messagesRef,
+      orderBy('timestamp', 'asc'),
+      limit(100)
+    );
 
-    res.status(200).json(messages.reverse()); // Return oldest first
+    const snapshot = await getDocs(q);
+    const messages = [];
+
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      messages.push({
+        id: doc.id,
+        ...data,
+        timestamp: data.timestamp?.toDate().toISOString()
+      });
+    });
+
+    res.json(messages);
+
   } catch (error) {
-    console.error('Error fetching messages:', error);
-    res.status(500).json({ error: 'Failed to fetch messages' });
+    console.error('Get messages error:', error);
+    res.status(500).json({ error: 'Failed to get messages' });
   }
 });
 
-// Get user's chats
 app.get('/users/:userId/chats', async (req, res) => {
   try {
     const { userId } = req.params;
     const chatsRef = collection(db, 'chats');
-    const q = query(chatsRef, where('participants', 'array-contains', userId));
-    const querySnapshot = await getDocs(q);
+    const q = query(
+      chatsRef,
+      where('participants', 'array-contains', userId)
+    );
 
-    const chats = querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+    const snapshot = await getDocs(q);
+    const chats = [];
 
-    res.status(200).json(chats);
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      chats.push({
+        id: doc.id,
+        ...data,
+        lastMessageAt: data.lastMessageAt?.toDate().toISOString()
+      });
+    });
+
+    res.json(chats);
+
   } catch (error) {
-    console.error('Error fetching user chats:', error);
-    res.status(500).json({ error: 'Failed to fetch chats' });
+    console.error('Get chats error:', error);
+    res.status(500).json({ error: 'Failed to get chats' });
   }
 });
 
