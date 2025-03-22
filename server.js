@@ -15,6 +15,12 @@ dotenv.config();
 
 const app = express();
 
+
+
+import { db } from './firebaseConfig/firebaseConfig';
+
+
+
 // Middleware setup
 app.use(cors({
   origin: ['https://your-frontend-domain.vercel.app', 'http://localhost:3000'],
@@ -38,6 +44,123 @@ const startServer = async () => {
         timestamp: new Date().toISOString()
       });
     });
+
+
+
+app.post('/chats', async (req, res) => {
+  try {
+    const { participantIds, requestId } = req.body;
+    
+    // Check if chat already exists
+    const chatsRef = collection(db, 'chats');
+    const q = query(chatsRef, where('participants', 'array-contains', participantIds[0]));
+    const querySnapshot = await getDocs(q);
+
+    let existingChat;
+    querySnapshot.forEach((doc) => {
+      const chat = doc.data();
+      if (arraysEqual(chat.participants.sort(), participantIds.sort())) {
+        existingChat = { id: doc.id, ...chat };
+      }
+    });
+
+    if (existingChat) {
+      return res.status(200).json(existingChat);
+    }
+
+    // Create new chat
+    const newChatRef = await addDoc(collection(db, 'chats'), {
+      participants: participantIds,
+      lastMessage: '',
+      lastMessageAt: new Date(),
+      requestId: requestId || null
+    });
+
+    res.status(201).json({ 
+      id: newChatRef.id,
+      participants: participantIds,
+      requestId
+    });
+
+  } catch (error) {
+    console.error('Error creating chat:', error);
+    res.status(500).json({ error: 'Failed to create chat' });
+  }
+});
+
+// Send message
+app.post('/chats/:chatId/messages', async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const { senderId, content } = req.body;
+
+    const messagesRef = collection(db, 'chats', chatId, 'messages');
+    const newMessageRef = await addDoc(messagesRef, {
+      senderId,
+      content,
+      timestamp: new Date(),
+      read: false
+    });
+
+    // Update chat last message
+    const chatRef = doc(db, 'chats', chatId);
+    await updateDoc(chatRef, {
+      lastMessage: content,
+      lastMessageAt: new Date()
+    });
+
+    res.status(201).json({
+      id: newMessageRef.id,
+      chatId,
+      senderId,
+      content,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Error sending message:', error);
+    res.status(500).json({ error: 'Failed to send message' });
+  }
+});
+
+// Get chat history
+app.get('/chats/:chatId/messages', async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const messagesRef = collection(db, 'chats', chatId, 'messages');
+    const querySnapshot = await getDocs(query(messagesRef, orderBy('timestamp', 'desc'), limit(50)));
+    
+    const messages = querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+
+    res.status(200).json(messages.reverse()); // Return oldest first
+  } catch (error) {
+    console.error('Error fetching messages:', error);
+    res.status(500).json({ error: 'Failed to fetch messages' });
+  }
+});
+
+// Get user's chats
+app.get('/users/:userId/chats', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const chatsRef = collection(db, 'chats');
+    const q = query(chatsRef, where('participants', 'array-contains', userId));
+    const querySnapshot = await getDocs(q);
+
+    const chats = querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+
+    res.status(200).json(chats);
+  } catch (error) {
+    console.error('Error fetching user chats:', error);
+    res.status(500).json({ error: 'Failed to fetch chats' });
+  }
+});
 
 
 // Fetch customer details by email
