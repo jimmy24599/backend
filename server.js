@@ -91,6 +91,79 @@ const startServer = async () => {
   }
 });
 
+
+    app.post('/chats', async (req, res) => {
+  try {
+    const { participantIds } = req.body;
+    console.log('Received chat creation request:', participantIds);
+
+    // Validate input
+    if (!Array.isArray(participantIds) || participantIds.length !== 2) {
+      console.error('Invalid participant IDs:', participantIds);
+      return res.status(400).json({ 
+        error: 'Exactly 2 participant IDs required',
+        received: participantIds 
+      });
+    }
+
+    // Add Firestore query logging
+    const chatsRef = collection(db, 'chats');
+    const q = query(
+      chatsRef, 
+      where('participants', 'array-contains', participantIds[0])
+    );
+    
+    console.log('Firestore query:', q);
+
+    const snapshot = await getDocs(q);
+    console.log('Query snapshot size:', snapshot.size);
+
+    let existingChat = null;
+    snapshot.forEach(doc => {
+      const chat = doc.data();
+      console.log('Checking chat:', doc.id, chat.participants);
+      if (chat.participants.includes(participantIds[1])) {
+        existingChat = { id: doc.id, ...chat };
+      }
+    });
+
+    if (existingChat) {
+      console.log('Found existing chat:', existingChat.id);
+      return res.json(existingChat);
+    }
+
+    // Create new chat with timestamp
+    const newChat = {
+      participants: participantIds,
+      lastMessage: '',
+      lastMessageAt: serverTimestamp(),
+      createdAt: serverTimestamp()
+    };
+
+    console.log('Creating new chat:', newChat);
+    const docRef = await addDoc(chatsRef, newChat);
+    
+    console.log('Chat created successfully:', docRef.id);
+    res.status(201).json({ 
+      id: docRef.id, 
+      ...newChat,
+      // Add temporary timestamp for client
+      serverTime: new Date().toISOString() 
+    });
+
+  } catch (error) {
+    console.error('Chat creation error:', {
+      error: error.message,
+      stack: error.stack,
+      body: req.body,
+      timestamp: new Date().toISOString()
+    });
+    res.status(500).json({ 
+      error: 'Chat creation failed',
+      details: error.message 
+    });
+  }
+});
     
     app.post('/chats', async (req, res) => {
       try {
