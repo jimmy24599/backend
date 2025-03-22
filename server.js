@@ -11,6 +11,18 @@ import Chat from "./models/chat.model.js"; //import chat model
 import Message from "./models/message.model.js"; //import message model
 import cors from 'cors'; 
 import { FirestoreMessage, FirestoreChat } from './firebaseConfig/models';
+import { 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  addDoc, 
+  doc, 
+  updateDoc, 
+  orderBy, 
+  limit,
+  serverTimestamp  // Use Firestore's timestamp
+} from 'firebase/firestore';
 
 
 dotenv.config();
