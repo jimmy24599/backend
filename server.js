@@ -57,7 +57,41 @@ const startServer = async () => {
     });
 
 
+    app.get('/chats', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID required' });
+    }
 
+    const chatsRef = collection(db, 'chats');
+    const q = query(
+      chatsRef, 
+      where('participants', 'array-contains', userId)
+    );
+    
+    const snapshot = await getDocs(q);
+    const chats = [];
+    
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      chats.push({
+        id: doc.id,
+        ...data,
+        lastMessageAt: data.lastMessageAt?.toDate().toISOString()
+      });
+    });
+
+    res.json(chats);
+    
+  } catch (error) {
+    console.error('Get chats error:', error);
+    res.status(500).json({ error: 'Failed to get chats' });
+  }
+});
+
+    
     app.post('/chats', async (req, res) => {
       try {
         const { participantIds } = req.body;
