@@ -62,40 +62,57 @@ const startServer = async () => {
     .catch((err) => {
       console.error('Persistence failed:', err);
     });
+
+
+    //Get Chats
     app.get('/chats', async (req, res) => {
-      const timeout = setTimeout(() => {
-        res.status(504).json({ error: "Function timeout" });
-      }, 8000);
-    
-      try {
-        const { userId } = req.query;
-        if (!userId) return res.status(400).json({ error: 'User ID required' });
-    
-        const chatsRef = collection(db, 'chats');
-        const q = query(
-          chatsRef,
-          where('participants', 'array-contains', userId),
-          orderBy('createdAt', 'desc'),
-          limit(20)
-        );
-    
-        const snapshot = await getDocs(q);
-        const chats = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-          lastMessageAt: doc.data().lastMessageAt?.toDate().toISOString(),
-          createdAt: doc.data().createdAt?.toDate().toISOString()
-        }));
-    
-        res.json(chats);
-      } catch (error) {
-        console.error('Get chats error:', error);
-        res.status(500).json({ error: 'Failed to get chats' });
-      } finally {
-        clearTimeout(timeout);
-      }
+  const timeout = setTimeout(() => {
+    res.status(504).json({ error: "Function timeout" });
+  }, 8000);
+
+  try {
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ error: 'User ID required' });
+
+    const chatsRef = collection(db, 'chats');
+    const q = query(
+      chatsRef,
+      where('participants', 'array-contains', userId),
+      orderBy('createdAt', 'desc'),
+      limit(20)
+    );
+
+    const snapshot = await getDocs(q);
+    const chats = snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        participants: data.participants || [],
+        lastMessage: data.lastMessage || '',
+        // Safe timestamp handling
+        lastMessageAt: data.lastMessageAt?.toDate?.()?.toISOString?.() || new Date().toISOString(),
+        createdAt: data.createdAt?.toDate?.()?.toISOString?.() || new Date().toISOString()
+      };
     });
 
+    res.json(chats);
+  } catch (error) {
+    console.error('Chat fetch error:', {
+      error: error.message,
+      stack: error.stack,
+      userId: req.query.userId,
+      timestamp: new Date().toISOString()
+    });
+    res.status(500).json({ 
+      error: 'Failed to get chats',
+      details: error.message 
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+});
+
+    
 
     app.post('/chats', async (req, res) => {
   try {
