@@ -65,7 +65,7 @@ const startServer = async () => {
 
 
         // Get messages
-    app.get('/chats/:chatId/messages', async (req, res) => {
+app.get('/chats/:chatId/messages', async (req, res) => {
       try {
         const { chatId } = req.params;
         const messagesRef = collection(db, 'chats', chatId, 'messages');
@@ -121,9 +121,9 @@ const startServer = async () => {
         });
     
         res.json({
-          success: true,
-          message: 'Message sent successfully',
-          messageId: docRef.id, // Optionally send the message ID back
+          id: docRef.id,
+          ...messageData,
+          timestamp: new Date().toISOString() // Convert for client
         });
     
       } catch (error) {
