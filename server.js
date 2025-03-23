@@ -23,6 +23,8 @@ import {
   serverTimestamp  // Use Firestore's timestamp
 } from 'firebase/firestore';
 import { db } from './fireBaseConfig/firebaseConfig.js';
+import { enableIndexedDbPersistence } from 'firebase/firestore'; 
+
 
 dotenv.config();
 
@@ -56,40 +58,43 @@ const startServer = async () => {
       });
     });
 
-
-    app.get('/chats', async (req, res) => {
-  try {
-    const { userId } = req.query;
-    
-    if (!userId) {
-      return res.status(400).json({ error: 'User ID required' });
-    }
-
-    const chatsRef = collection(db, 'chats');
-    const q = query(
-      chatsRef, 
-      where('participants', 'array-contains', userId)
-    );
-    
-    const snapshot = await getDocs(q);
-    const chats = [];
-    
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      chats.push({
-        id: doc.id,
-        ...data,
-        lastMessageAt: data.lastMessageAt?.toDate().toISOString()
-      });
+    enableIndexedDbPersistence(db)
+    .catch((err) => {
+      console.error('Persistence failed:', err);
     });
-
-    res.json(chats);
+    app.get('/chats', async (req, res) => {
+      const timeout = setTimeout(() => {
+        res.status(504).json({ error: "Function timeout" });
+      }, 8000);
     
-  } catch (error) {
-    console.error('Get chats error:', error);
-    res.status(500).json({ error: 'Failed to get chats' });
-  }
-});
+      try {
+        const { userId } = req.query;
+        if (!userId) return res.status(400).json({ error: 'User ID required' });
+    
+        const chatsRef = collection(db, 'chats');
+        const q = query(
+          chatsRef,
+          where('participants', 'array-contains', userId),
+          orderBy('createdAt', 'desc'),
+          limit(20)
+        );
+    
+        const snapshot = await getDocs(q);
+        const chats = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          lastMessageAt: doc.data().lastMessageAt?.toDate().toISOString(),
+          createdAt: doc.data().createdAt?.toDate().toISOString()
+        }));
+    
+        res.json(chats);
+      } catch (error) {
+        console.error('Get chats error:', error);
+        res.status(500).json({ error: 'Failed to get chats' });
+      } finally {
+        clearTimeout(timeout);
+      }
+    });
 
 
     app.post('/chats', async (req, res) => {
