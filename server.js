@@ -259,50 +259,7 @@ app.get('/chats/:chatId/messages', async (req, res) => {
   }
 });
     
-    app.post('/chats', async (req, res) => {
-      try {
-        const { participantIds } = req.body;
-        
-        // Validate participants
-        if (!Array.isArray(participantIds) || participantIds.length !== 2) {
-          return res.status(400).json({ error: 'Exactly 2 participant IDs required' });
-        }
     
-        // Check existing chat
-        const chatsRef = collection(db, 'chats');
-        const q = query(
-          chatsRef, 
-          where('participants', 'array-contains', participantIds[0])
-        );
-        
-        const snapshot = await getDocs(q);
-        let existingChat = null;
-        
-        snapshot.forEach(doc => {
-          const chat = doc.data();
-          if (chat.participants.includes(participantIds[1])) {
-            existingChat = { id: doc.id, ...chat };
-          }
-        });
-    
-        if (existingChat) return res.json(existingChat);
-    
-        // Create new chat
-        const newChat = {
-          participants: participantIds,
-          lastMessage: '',
-          lastMessageAt: serverTimestamp(),
-          createdAt: serverTimestamp()
-        };
-    
-        const docRef = await addDoc(chatsRef, newChat);
-        res.status(201).json({ id: docRef.id, ...newChat });
-    
-      } catch (error) {
-        console.error('Chat error:', error);
-        res.status(500).json({ error: 'Chat creation failed' });
-      }
-    });
     
     // Send message
     app.post('/chats/:chatId/messages', async (req, res) => {
