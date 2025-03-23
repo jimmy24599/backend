@@ -1,7 +1,6 @@
-
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
-import { getAuth } from "firebase/auth"; 
+import { getAuth } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDgwc86-vVQ492yDQ5O-FkYhig7T8ApQRQ",
@@ -13,23 +12,27 @@ const firebaseConfig = {
   measurementId: "G-E0KY8V1Z7Q"
 };
 
-
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);      // Firestore for messages
 export const auth = getAuth(app);          // Authentication (needed even with Clerk)
-export const firebaseApp = app;       
+export const firebaseApp = app;
 
-// Get Firebase Messaging instance
-const messaging = getMessaging(app);
+import { getMessaging, onMessage } from "firebase/messaging";
 
-// Function to handle incoming messages
-const handleIncomingMessage = (payload) => {
-  console.log('Received foreground message ', payload);
-  // Handle the message payload here, e.g., display a notification
-};
+let messaging;
 
-// Set up message listener
-onMessage(messaging, handleIncomingMessage);
+if (typeof window !== 'undefined') {
+  messaging = getMessaging(app);
 
+  // Function to handle incoming messages
+  const handleIncomingMessage = (payload) => {
+    console.log('Received foreground message ', payload);
+    // Handle the message payload here, e.g., display a notification
+  };
 
+  // Set up message listener
+  onMessage(messaging, handleIncomingMessage);
+}
+
+export { messaging };
