@@ -64,6 +64,78 @@ const startServer = async () => {
     });
 
 
+        // Get messages
+    app.get('/chats/:chatId/messages', async (req, res) => {
+      try {
+        const { chatId } = req.params;
+        const messagesRef = collection(db, 'chats', chatId, 'messages');
+        const q = query(messagesRef, orderBy('timestamp', 'asc'), limit(100));
+        
+        const snapshot = await getDocs(q);
+        const messages = [];
+        
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          messages.push({
+            id: doc.id,
+            ...data,
+            timestamp: data.timestamp?.toDate().toISOString()
+          });
+        });
+    
+        res.json({ success: true, messages: messages });
+    
+      } catch (error) {
+        console.error('Get messages error:', error);
+        res.status(500).json({ success: false, message: 'Failed to get messages' });
+      }
+    });
+
+    // Send message
+    app.post('/chats/:chatId/messages', async (req, res) => {
+      try {
+        const { chatId } = req.params;
+        const { senderId, content } = req.body;
+    
+        // Validate input
+        if (!senderId || !content) {
+          return res.status(400).json({ success: false, message: 'Missing required fields' });
+        }
+    
+        // Add message
+        const messagesRef = collection(db, 'chats', chatId, 'messages');
+        const messageData = {
+          senderId,
+          content,
+          timestamp: serverTimestamp(),
+          read: false
+        };
+        
+        const docRef = await addDoc(messagesRef, messageData);
+    
+        // Update chat metadata
+        const chatRef = doc(db, 'chats', chatId);
+        await updateDoc(chatRef, {
+          lastMessage: content,
+          lastMessageAt: serverTimestamp()
+        });
+    
+        res.json({
+          success: true,
+          message: 'Message sent successfully',
+          messageId: docRef.id, // Optionally send the message ID back
+        });
+    
+      } catch (error) {
+        console.error('Message error:', error);
+        res.status(500).json({ success: false, message: 'Message send failed' });
+      }
+    });
+
+
+
+    
+
     //Get Chats
     app.get('/chats', async (req, res) => {
   const timeout = setTimeout(() => {
