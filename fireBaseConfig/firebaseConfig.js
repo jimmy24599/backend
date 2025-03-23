@@ -13,10 +13,23 @@ const firebaseConfig = {
   measurementId: "G-E0KY8V1Z7Q"
 };
 
+
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);      // Firestore for messages
 export const auth = getAuth(app);          // Authentication (needed even with Clerk)
 export const firebaseApp = app;       
+
+// Get Firebase Messaging instance
+const messaging = getMessaging(app);
+
+// Function to handle incoming messages
+const handleIncomingMessage = (payload) => {
+  console.log('Received foreground message ', payload);
+  // Handle the message payload here, e.g., display a notification
+};
+
+// Set up message listener
+onMessage(messaging, handleIncomingMessage);
 
 
