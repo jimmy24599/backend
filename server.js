@@ -36,7 +36,7 @@ const app = express();
 
 // Middleware setup
 app.use(cors({
-  origin: ['https://your-frontend-domain.vercel.app', 'http://localhost:3000'],
+  origin: ['https://backend-zsxc.vercel.app/', 'http://localhost:3000'],
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }));
