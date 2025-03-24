@@ -336,45 +336,71 @@ app.get("/customer/:email", async (req, res) => {
 
 // Customer registration endpoint
 app.post("/customer", async (req, res) => {
+  const customer = req.body; // Customer data from request body
+
+  if (!customer.first_name || !customer.last_name || !customer.email) {
+    return res.status(400).json({ success: false, message: "Please provide all fields." });
+  }
+
   try {
-    const { role = 'customer', ...customerData } = req.body;
-
-    // Validation
-    if (!customerData.first_name || !customerData.last_name || !customerData.email) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Missing required fields" 
-      });
-    }
-
-    // Check for existing customer
-    const existingCustomer = await Customer.findOne({ email: customerData.email });
+    // Check if customer already exists
+    const existingCustomer = await Customer.findOne({ email: customer.email });
     if (existingCustomer) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Customer already exists" 
-      });
+      return res.status(400).json({ success: false, message: "Customer already exists." });
     }
 
-    // Create with role
-    const newCustomer = await Customer.create({
-      ...customerData,
-      role // Ensures role is saved
-    });
+    // Create new customer
+    const newCustomer = new Customer(customer);
+    await newCustomer.save();
 
-    res.status(201).json({ 
-      success: true, 
-      data: newCustomer 
-    });
+    res.status(201).json({ success: true, data: newCustomer });
 
   } catch (error) {
-    console.error("POST Customer Error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message || "Server error" 
-    });
+    console.error("Error in creating new customer:", error.message);
+    res.status(500).json({ success: false, message: "Server error." });
   }
 });
+
+//Fetch services by category (Moved Outside)
+app.get("/services/:category", async (req, res) => {
+  const { category } = req.params;
+
+  try {
+    const services = await Services.find({ category });
+    res.status(200).json({ success: true, data: services });
+  } catch (error) {
+    console.error("Error fetching services:", error.message);
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
+// Create a new request
+app.post("/request", async (req, res) => {
+  const { customerID, service, date, time, description, budget, state } = req.body;
+
+  if (!customerID || !service || !date || !time || !description || !budget) {
+      return res.status(400).json({ success: false, message: "Please fill out all fields." });
+  }
+
+  try {
+      const newRequest = new Request({
+          customerID, // Ensure customerID is included
+          service,
+          date,
+          time,
+          description,
+          budget,
+          state,
+      });
+
+      await newRequest.save();
+      res.status(201).json({ success: true, data: newRequest });
+  } catch (error) {
+      console.error('Error creating request:', error.message);
+      res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
 
 //Fetch services by category (Moved Outside)
 app.get("/services/:category", async (req, res) => {
