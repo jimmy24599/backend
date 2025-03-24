@@ -336,28 +336,43 @@ app.get("/customer/:email", async (req, res) => {
 
 // Customer registration endpoint
 app.post("/customer", async (req, res) => {
-  const customer = req.body; // Customer data from request body
-
-  if (!customer.first_name || !customer.last_name || !customer.email) {
-    return res.status(400).json({ success: false, message: "Please provide all fields." });
-  }
-
   try {
-    // Check if customer already exists
-    const existingCustomer = await Customer.findOne({ email: customer.email });
-    if (existingCustomer) {
-      return res.status(400).json({ success: false, message: "Customer already exists." });
+    const { role = 'customer', ...customerData } = req.body;
+
+    // Validation
+    if (!customerData.first_name || !customerData.last_name || !customerData.email) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Missing required fields" 
+      });
     }
 
-    // Create new customer
-    const newCustomer = new Customer(customer);
-    await newCustomer.save();
+    // Check for existing customer
+    const existingCustomer = await Customer.findOne({ email: customerData.email });
+    if (existingCustomer) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Customer already exists" 
+      });
+    }
 
-    res.status(201).json({ success: true, data: newCustomer });
+    // Create with role
+    const newCustomer = await Customer.create({
+      ...customerData,
+      role // Ensures role is saved
+    });
+
+    res.status(201).json({ 
+      success: true, 
+      data: newCustomer 
+    });
 
   } catch (error) {
-    console.error("Error in creating new customer:", error.message);
-    res.status(500).json({ success: false, message: "Server error." });
+    console.error("POST Customer Error:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || "Server error" 
+    });
   }
 });
 
