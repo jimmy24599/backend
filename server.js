@@ -25,7 +25,6 @@ import {
 import { db } from './fireBaseConfig/firebaseConfig.js';
 import { enableIndexedDbPersistence } from 'firebase/firestore'; 
 
-
 dotenv.config();
 
 const app = express();
@@ -36,7 +35,7 @@ const app = express();
 
 // Middleware setup
 app.use(cors({
-  origin: ['https://backend-zsxc.vercel.app/', 'http://localhost:3000'],
+  origin: ['https://your-frontend-domain.vercel.app', 'http://localhost:3000'],
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }));
@@ -58,191 +57,116 @@ const startServer = async () => {
       });
     });
 
+
     enableIndexedDbPersistence(db)
     .catch((err) => {
       console.error('Persistence failed:', err);
     });
 
 
+
         // Get messages
-app.get('/chats/:chatId/messages', async (req, res) => {
-      try {
-        const { chatId } = req.params;
-        const messagesRef = collection(db, 'chats', chatId, 'messages');
-        const q = query(messagesRef, orderBy('timestamp', 'asc'), limit(100));
+        app.get('/chats/:chatId/messages', async (req, res) => {
+          try {
+            const { chatId } = req.params;
+            const messagesRef = collection(db, 'chats', chatId, 'messages');
+            const q = query(messagesRef, orderBy('timestamp', 'asc'), limit(100));
+            
+            const snapshot = await getDocs(q);
+            const messages = [];
+            
+            snapshot.forEach(doc => {
+              const data = doc.data();
+              messages.push({
+                id: doc.id,
+                ...data,
+                timestamp: data.timestamp?.toDate().toISOString()
+              });
+            });
         
-        const snapshot = await getDocs(q);
-        const messages = [];
+            res.json({ success: true, messages: messages });
         
-        snapshot.forEach(doc => {
-          const data = doc.data();
-          messages.push({
-            id: doc.id,
-            ...data,
-            timestamp: data.timestamp?.toDate().toISOString()
-          });
+          } catch (error) {
+            console.error('Get messages error:', error);
+            res.status(500).json({ success: false, message: 'Failed to get messages' });
+          }
         });
     
-        res.json({ success: true, messages: messages });
-    
-      } catch (error) {
-        console.error('Get messages error:', error);
-        res.status(500).json({ success: false, message: 'Failed to get messages' });
-      }
-    });
-
-    // Send message
-    app.post('/chats/:chatId/messages', async (req, res) => {
-      try {
-        const { chatId } = req.params;
-        const { senderId, content } = req.body;
-    
-        // Validate input
-        if (!senderId || !content) {
-          return res.status(400).json({ success: false, message: 'Missing required fields' });
-        }
-    
-        // Add message
-        const messagesRef = collection(db, 'chats', chatId, 'messages');
-        const messageData = {
-          senderId,
-          content,
-          timestamp: serverTimestamp(),
-          read: false
-        };
+        // Send message
+        app.post('/chats/:chatId/messages', async (req, res) => {
+          try {
+            const { chatId } = req.params;
+            const { senderId, content } = req.body;
         
-        const docRef = await addDoc(messagesRef, messageData);
-    
-        // Update chat metadata
-        const chatRef = doc(db, 'chats', chatId);
-        await updateDoc(chatRef, {
-          lastMessage: content,
-          lastMessageAt: serverTimestamp()
+            // Validate input
+            if (!senderId || !content) {
+              return res.status(400).json({ success: false, message: 'Missing required fields' });
+            }
+        
+            // Add message
+            const messagesRef = collection(db, 'chats', chatId, 'messages');
+            const messageData = {
+              senderId,
+              content,
+              timestamp: serverTimestamp(),
+              read: false
+            };
+            
+            const docRef = await addDoc(messagesRef, messageData);
+        
+            // Update chat metadata
+            const chatRef = doc(db, 'chats', chatId);
+            await updateDoc(chatRef, {
+              lastMessage: content,
+              lastMessageAt: serverTimestamp()
+            });
+        
+            res.json({
+              success: true,
+              message: 'Message sent successfully',
+              messageId: docRef.id, // Optionally send the message ID back
+            });
+        
+          } catch (error) {
+            console.error('Message error:', error);
+            res.status(500).json({ success: false, message: 'Message send failed' });
+          }
         });
     
-        res.json({
-          id: docRef.id,
-          ...messageData,
-          timestamp: new Date().toISOString() // Convert for client
-        });
-    
-      } catch (error) {
-        console.error('Message error:', error);
-        res.status(500).json({ success: false, message: 'Message send failed' });
-      }
-    });
 
-
-
-    
-
-    //Get Chats
     app.get('/chats', async (req, res) => {
-  const timeout = setTimeout(() => {
-    res.status(504).json({ error: "Function timeout" });
-  }, 8000);
-
-  try {
-    const { userId } = req.query;
-    if (!userId) return res.status(400).json({ error: 'User ID required' });
-
-    const chatsRef = collection(db, 'chats');
-    const q = query(
-      chatsRef,
-      where('participants', 'array-contains', userId),
-      orderBy('createdAt', 'desc'),
-      limit(20)
-    );
-
-    const snapshot = await getDocs(q);
-    const chats = snapshot.docs.map(doc => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        participants: data.participants || [],
-        lastMessage: data.lastMessage || '',
-        // Safe timestamp handling
-        lastMessageAt: data.lastMessageAt?.toDate?.()?.toISOString?.() || new Date().toISOString(),
-        createdAt: data.createdAt?.toDate?.()?.toISOString?.() || new Date().toISOString()
-      };
-    });
-
-    res.json(chats);
-  } catch (error) {
-    console.error('Chat fetch error:', {
-      error: error.message,
-      stack: error.stack,
-      userId: req.query.userId,
-      timestamp: new Date().toISOString()
-    });
-    res.status(500).json({ 
-      error: 'Failed to get chats',
-      details: error.message 
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
-});
-
+      const timeout = setTimeout(() => {
+        res.status(504).json({ error: "Function timeout" });
+      }, 8000);
     
-
-    app.post('/chats', async (req, res) => {
-  try {
-    const { participantIds } = req.body;
+      try {
+        const { userId } = req.query;
+        if (!userId) return res.status(400).json({ error: 'User ID required' });
     
-    // Validate input
-    if (!Array.isArray(participantIds) || participantIds.length !== 2) {
-      return res.status(400).json({ 
-        error: 'Exactly 2 participant IDs required',
-        received: participantIds 
-      });
-    }
-
-    const sortedParticipants = participantIds.sort();
-    const chatsRef = collection(db, 'chats');
+        const chatsRef = collection(db, 'chats');
+        const q = query(
+          chatsRef,
+          where('participants', 'array-contains', userId),
+          orderBy('createdAt', 'desc'),
+          limit(20)
+        );
     
-    // Check existing chat using sorted IDs
-    const q = query(
-      chatsRef,
-      where('participants', '==', sortedParticipants)
-    );
-
-    const snapshot = await getDocs(q);
+        const snapshot = await getDocs(q);
+        const chats = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          lastMessageAt: doc.data().lastMessageAt?.toDate().toISOString(),
+          createdAt: doc.data().createdAt?.toDate().toISOString()
+        }));
     
-    if (!snapshot.empty) {
-      const existingChat = snapshot.docs[0];
-      return res.json({
-        id: existingChat.id,
-        ...existingChat.data()
-      });
-    }
-
-    // Create new chat
-    const docRef = await addDoc(chatsRef, {
-      participants: sortedParticipants,
-      lastMessage: '',
-      lastMessageAt: serverTimestamp(),
-      createdAt: serverTimestamp()
+        res.json(chats);
+      } catch (error) {
+        console.error('Get chats error:', error);
+        res.status(500).json({ error: 'Failed to get chats' });
+      } finally {
+        clearTimeout(timeout);
+      }
     });
-
-    res.status(201).json({
-      id: docRef.id,
-      participants: sortedParticipants,
-      lastMessage: '',
-      lastMessageAt: new Date().toISOString(),
-      createdAt: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error('Chat creation error:', error);
-    res.status(500).json({ 
-      error: 'Chat creation failed',
-      details: error.message 
-    });
-  }
-});
-    
-    
     
     // Send message
     app.post('/chats/:chatId/messages', async (req, res) => {
@@ -318,6 +242,114 @@ app.get('/chats/:chatId/messages', async (req, res) => {
       console.log(`🚀 Firebase Chat API running on port ${PORT}`);
     });
 
+
+    app.get('/chats', async (req, res) => {
+      try {
+        const { userId } = req.query;
+        
+        if (!userId) {
+          return res.status(400).json({ error: 'User ID required' });
+        }
+    
+        const chatsRef = collection(db, 'chats');
+        const q = query(
+          chatsRef, 
+          where('participants', 'array-contains', userId)
+        );
+        
+        const snapshot = await getDocs(q);
+        const chats = [];
+        
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          chats.push({
+            id: doc.id,
+            ...data,
+            lastMessageAt: data.lastMessageAt?.toDate().toISOString()
+          });
+        });
+    
+        res.json(chats);
+        
+      } catch (error) {
+        console.error('Get chats error:', error);
+        res.status(500).json({ error: 'Failed to get chats' });
+      }
+    });
+
+    app.post('/chats', async (req, res) => {
+      try {
+        const { participantIds } = req.body;
+        console.log('Received chat creation request:', participantIds);
+    
+        // Validate input
+        if (!Array.isArray(participantIds) || participantIds.length !== 2) {
+          console.error('Invalid participant IDs:', participantIds);
+          return res.status(400).json({ 
+            error: 'Exactly 2 participant IDs required',
+            received: participantIds 
+          });
+        }
+    
+        // Add Firestore query logging
+        const chatsRef = collection(db, 'chats');
+        const q = query(
+          chatsRef, 
+          where('participants', 'array-contains', participantIds[0])
+        );
+        
+        console.log('Firestore query:', q);
+    
+        const snapshot = await getDocs(q);
+        console.log('Query snapshot size:', snapshot.size);
+    
+        let existingChat = null;
+        snapshot.forEach(doc => {
+          const chat = doc.data();
+          console.log('Checking chat:', doc.id, chat.participants);
+          if (chat.participants.includes(participantIds[1])) {
+            existingChat = { id: doc.id, ...chat };
+          }
+        });
+    
+        if (existingChat) {
+          console.log('Found existing chat:', existingChat.id);
+          return res.json(existingChat);
+        }
+    
+        // Create new chat with timestamp
+        const newChat = {
+          participants: participantIds,
+          lastMessage: '',
+          lastMessageAt: serverTimestamp(),
+          createdAt: serverTimestamp()
+        };
+    
+        console.log('Creating new chat:', newChat);
+        const docRef = await addDoc(chatsRef, newChat);
+        
+        console.log('Chat created successfully:', docRef.id);
+        res.status(201).json({ 
+          id: docRef.id, 
+          ...newChat,
+          // Add temporary timestamp for client
+          serverTime: new Date().toISOString() 
+        });
+    
+      } catch (error) {
+        console.error('Chat creation error:', {
+          error: error.message,
+          stack: error.stack,
+          body: req.body,
+          timestamp: new Date().toISOString()
+        });
+        res.status(500).json({ 
+          error: 'Chat creation failed',
+          details: error.message 
+        });
+      }
+    });
+
 // Fetch customer details by email
 app.get("/customer/:email", async (req, res) => {
   const { email } = req.params;
@@ -360,47 +392,6 @@ app.post("/customer", async (req, res) => {
     res.status(500).json({ success: false, message: "Server error." });
   }
 });
-
-//Fetch services by category (Moved Outside)
-app.get("/services/:category", async (req, res) => {
-  const { category } = req.params;
-
-  try {
-    const services = await Services.find({ category });
-    res.status(200).json({ success: true, data: services });
-  } catch (error) {
-    console.error("Error fetching services:", error.message);
-    res.status(500).json({ success: false, message: "Server error." });
-  }
-});
-
-// Create a new request
-app.post("/request", async (req, res) => {
-  const { customerID, service, date, time, description, budget, state } = req.body;
-
-  if (!customerID || !service || !date || !time || !description || !budget) {
-      return res.status(400).json({ success: false, message: "Please fill out all fields." });
-  }
-
-  try {
-      const newRequest = new Request({
-          customerID, // Ensure customerID is included
-          service,
-          date,
-          time,
-          description,
-          budget,
-          state,
-      });
-
-      await newRequest.save();
-      res.status(201).json({ success: true, data: newRequest });
-  } catch (error) {
-      console.error('Error creating request:', error.message);
-      res.status(500).json({ success: false, message: "Server error." });
-  }
-});
-
 
 //Fetch services by category (Moved Outside)
 app.get("/services/:category", async (req, res) => {
