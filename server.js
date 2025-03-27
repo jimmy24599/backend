@@ -7,38 +7,34 @@ import Request from './models/request.model.js'; // Import Requess model
 import Bid from "./models/bid.model.js"; // Import bid model
 import ServiceProvider from "./models/provider.model.js"; // Import the ServiceProvider model
 import Review from './models/review.model.js'; //Import review  model
-import Chat from "./models/chat.model.js"; //import chat model
-import Message from "./models/message.model.js"; //import message model
+import Chat from './models/chat.model.js'; //import chat model
+import Message from './models/message.model.js'; //import message model
 import cors from 'cors'; 
-import { 
-  collection, 
-  query, 
-  where, 
-  getDocs, 
-  addDoc, 
-  doc, 
-  updateDoc, 
-  orderBy, 
-  limit,
-  serverTimestamp  // Use Firestore's timestamp
-} from 'firebase/firestore';
-import { db } from './fireBaseConfig/firebaseConfig.js';
-import { enableIndexedDbPersistence } from 'firebase/firestore'; 
+import compression from 'compression';
+import mongoose from "mongoose"
+
+
+
 
 dotenv.config();
 
 const app = express();
-
-
-
+app.use(compression()); // ✅ Reduces response size
 
 
 // Middleware setup
 app.use(cors({
-  origin: ['https://backend-zsxc.vercel.app/', 'http://localhost:3000'],
+  origin: [
+    'http://localhost:3000', // Expo web port
+    'exp://192.168.x.x:3000', // Your local IP URL
+    'https://backend-zsxc.vercel.app/' // Production app URL
+  ],
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }));
+
+
+
 app.use(express.json());
 console.log("🔍 MONGO_URI:", process.env.MONGO_URI);
 // Database connection and server startup
@@ -56,6 +52,15 @@ const startServer = async () => {
         timestamp: new Date().toISOString()
       });
     });
+    app.get('/health-check', (req, res) => {
+      res.status(200).send('Server OK');
+    });
+
+
+
+    
+
+
 
 
 
@@ -535,6 +540,359 @@ app.post('/reviews/existence', async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
+
+
+
+// ======================
+// Updated Chat Endpoints
+// ======================
+
+// Middleware to check chat participation
+// Change this middleware
+const isParticipant = async (req, res, next) => {
+  try {
+    const { chatId } = req.params;
+    const userId = req.headers['user-id'] || req.query.userId;
+    
+    if (!userId) {
+      console.log('Missing user ID in headers/query');
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const chat = await Chat.findById(chatId);
+    if (!chat) {
+      console.log('Chat not found:', chatId);
+      return res.status(404).json({ success: false, message: 'Chat not found' });
+    }
+
+    if (![chat.customerId.toString(), chat.providerId.toString()].includes(userId)) {
+      console.log('User not participant:', {
+        userId,
+        customerId: chat.customerId.toString(),
+        providerId: chat.providerId.toString()
+      });
+      return res.status(403).json({ success: false, message: 'Not a participant' });
+    }
+
+    req.chat = chat;
+    next();
+  } catch (error) {
+    console.error('Middleware error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// Create new chat
+app.post('/chats', async (req, res) => {
+  try {
+    const { customerId, providerId } = req.body;
+    console.log('Chat creation request:', req.body);
+
+    // Validate request format
+    if (!customerId || !providerId) {
+      return res.status(400).json({
+        success: false,
+        message: "Both customerId and providerId are required",
+        errorCode: "MISSING_IDS"
+      });
+    }
+
+    // Validate MongoDB ID format
+    if (!mongoose.Types.ObjectId.isValid(customerId) || 
+        !mongoose.Types.ObjectId.isValid(providerId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ID format",
+        errorCode: "INVALID_ID_FORMAT"
+      });
+    }
+
+    // Check if participants exist
+    const [customer, provider] = await Promise.all([
+      Customer.findById(customerId),
+      ServiceProvider.findById(providerId)
+    ]);
+
+    if (!customer || !provider) {
+      return res.status(400).json({
+        success: false,
+        message: "Customer or provider not found",
+        errorCode: "PARTICIPANT_NOT_FOUND"
+      });
+    }
+
+    // Check for existing chat (both directions)
+    const existingChat = await Chat.findOne({
+      $or: [
+        { customerId, providerId },
+        { customerId: providerId, providerId: customerId }
+      ]
+    });
+
+    if (existingChat) {
+      return res.status(200).json({
+        success: true,
+        data: existingChat,
+        message: "Existing chat found"
+      });
+    }
+
+    // Create new chat
+    const newChat = new Chat({
+      customerId,
+      providerId,
+      last_message: "Chat started"
+    });
+
+    await newChat.save();
+
+    res.status(201).json({
+      success: true,
+      data: newChat,
+      message: "New chat created"
+    });
+
+  } catch (error) {
+    console.error('Chat creation error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      errorCode: "SERVER_ERROR"
+    });
+  }
+});
+
+// Get user's chats
+app.get('/chats/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const chats = await Chat.find({
+      $or: [
+        { customerId: userId },
+        { providerId: userId }
+      ]
+    })
+    .sort({ updatedAt: -1 })
+    .lean();
+
+    // Get participant details
+    const chatsWithDetails = await Promise.all(
+      chats.map(async (chat) => {
+        const isCustomer = chat.customerId === userId;
+        const otherId = isCustomer ? chat.providerId : chat.customerId;
+        
+        const participant = await ServiceProvider.findById(otherId) || 
+                          await Customer.findById(otherId);
+
+        return {
+          ...chat,
+          otherParticipant: {
+            _id: otherId,
+            name: participant?.name || 'Unknown User',
+            role: isCustomer ? 'provider' : 'customer'
+          }
+        };
+      })
+    );
+
+    res.json({ success: true, data: chatsWithDetails });
+  } catch (error) {
+    console.error('Error fetching chats:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Send message
+app.post('/chats/:chatId/messages', isParticipant, async (req, res) => {
+  try {
+    const { text } = req.body;
+    const chat = req.chat;
+    const senderId = req.headers['user-id']; // Get sender from headers
+
+    // Validate required fields
+    if (!text || !senderId) {
+      return res.status(400).json({ success: false, message: 'Missing required fields' });
+    }
+
+    const newMessage = new Message({
+      senderId,
+      receiverId: chat.customerId === senderId ? chat.providerId : chat.customerId,
+      chatId: chat._id,
+      text
+    });
+
+    await newMessage.save();
+
+    // Update chat last message
+    await Chat.findByIdAndUpdate(chat._id, {
+      last_message: text,
+      updatedAt: Date.now()
+    });
+
+    res.status(201).json({ success: true, data: newMessage });
+  } catch (error) {
+    console.error('Error sending message:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Get chat messages
+app.get('/chats/:chatId/messages', isParticipant, async (req, res) => {
+  try {
+    const messages = await Message.find({ chatId: req.params.chatId })
+      .sort({ createdAt: 1 })
+      .lean();
+    
+    console.log(`Found ${messages.length} messages for chat ${req.params.chatId}`);
+    res.json({ success: true, data: messages });
+  } catch (error) {
+    console.error('Error fetching messages:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+app.get('/user/:id', async (req, res) => {
+  try {
+    const user = await ServiceProvider.findById(req.params.id) || 
+                 await Customer.findById(req.params.id);
+    
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    res.status(200).json({ 
+      success: true, 
+      data: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching user:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// server.js
+app.get('/chats/existing', async (req, res) => {
+  try {
+    const { customerId, providerId } = req.query;
+    
+    if (!customerId || !providerId) {
+      return res.status(400).json({
+        success: false,
+        message: "Both customerId and providerId are required"
+      });
+    }
+
+    const chats = await Chat.find({
+      $or: [
+        { customerId, providerId },
+        { customerId: providerId, providerId: customerId }
+      ]
+    });
+
+    res.status(200).json({
+      success: true,
+      data: chats
+    });
+  } catch (error) {
+    console.error('Error checking existing chats:', error);
+    res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
+  }
+});
+
+
+app.put('/messages/mark-seen', async (req, res) => {
+  try {
+    const { messageIds, userId } = req.body;
+    
+    if (!messageIds || !Array.isArray(messageIds) || !userId) {
+      return res.status(400).json({ success: false, message: "Invalid request" });
+    }
+
+    await Message.updateMany(
+      { _id: { $in: messageIds }, receiverId: userId },
+      { $set: { seen: true } }
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error marking messages as seen:', error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+app.get('/chats/provider/:providerId', async (req, res) => {
+  try {
+    const { providerId } = req.params;
+    
+    const chats = await Chat.find({ 
+      $or: [
+        { providerId: providerId },
+        { customerId: providerId } // If provider could be customer in some case
+      ]
+    })
+    .sort({ updatedAt: -1 });
+
+    res.status(200).json({ 
+      success: true, 
+      data: chats 
+    });
+  } catch (error) {
+    console.error("Error fetching provider chats:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Server error" 
+    });
+  }
+});
+
+app.get('/provider/email/:email', async (req, res) => {
+  try {
+    const { email } = req.params;
+    const provider = await ServiceProvider.findOne({ email });
+    
+    if (!provider) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Provider not found" 
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: provider
+    });
+  } catch (error) {
+    console.error("Error fetching provider by email:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Server error" 
+    });
+  }
+});
+
+
+app.get('/chats/customer/:customerId', async (req, res) => {
+  try {
+    const chats = await Chat.find({ customerId: req.params.customerId })
+      .sort({ updatedAt: -1 });
+    res.json({ success: true, data: chats });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// ======================
+// End of Chat Endpoints
+// ======================
 
 
 // Start server
