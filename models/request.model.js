@@ -20,7 +20,7 @@ const requestSchema = new mongoose.Schema({
         required: true
     },
     details: {
-        type: mongoose.Schema.Types.Mixed, // flexible custom fields per service
+        type: mongoose.Schema.Types.Mixed, 
       },
     price:{
         type:Number,
@@ -29,9 +29,13 @@ const requestSchema = new mongoose.Schema({
         type: Date,
         required: true
     },
-    location:{
-        type:String
-    },
+    location: {
+        type: {
+          latitude: Number,
+          longitude: Number
+        },
+        required: false
+      },
     state:{
         type: String,
         default: 'in-progress',

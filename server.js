@@ -287,6 +287,15 @@ app.post('/request', upload.single('image'), async (req, res) => {
       }
     }
 
+    let location = null;
+    if (req.body.location && typeof req.body.location === 'string') {
+      try {
+        location = JSON.parse(req.body.location);
+      } catch (err) {
+        console.warn('⚠️ Failed to parse location:', err.message);
+      }
+    }
+
     const newRequest = new Request({
       customerID,
       service,
@@ -296,6 +305,7 @@ app.post('/request', upload.single('image'), async (req, res) => {
       state,
       image: req.file?.location, // S3 image URL
       details, // Parsed details here
+      location, 
     });
 
     await newRequest.save();
@@ -517,6 +527,46 @@ app.get("/bids/:requestId", async (req, res) => {
 });
 
 
+//Provider update + calculate rating
+app.get("/provider-average-rating/:providerId", async (req, res) => {
+  const { providerId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(providerId)) {
+    return res.status(400).json({ success: false, message: "Invalid provider ID" });
+  }
+
+  try {
+    const result = await Review.aggregate([
+      { $match: { providerId: new mongoose.Types.ObjectId(providerId) } },
+      {
+        $group: {
+          _id: null,
+          averageRating: { $avg: "$rating" },
+          totalRatings: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const averageRating = result[0]?.averageRating || 0;
+    const totalRatings = result[0]?.totalRatings || 0;
+
+    // Optionally update the provider's rating field
+    await ServiceProvider.findByIdAndUpdate(providerId, {
+      rating: averageRating
+    });
+
+    res.json({
+      success: true,
+      averageRating: parseFloat(averageRating.toFixed(2)),
+      totalRatings
+    });
+  } catch (error) {
+    console.error("Error calculating average rating:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+
 //Provider Leaderboard + Badges
 app.get("/provider-leaderboard", async (req, res) => {
   try {
@@ -688,8 +738,8 @@ app.get("/requests-by-provider/:providerId", async (req, res) => {
   const { providerId } = req.params;
 
   try {
-    // Fetch requests that match the providerId
-    const requests = await Request.find({ providerId });
+    const requests = await Request.find({ providerId })
+      .populate("customerID"); // ✅ ADD THIS
 
     if (!requests.length) {
       return res.status(404).json({ success: false, message: "No active requests found for this provider." });
@@ -703,6 +753,70 @@ app.get("/requests-by-provider/:providerId", async (req, res) => {
 });
 
 
+//Calculate revenue
+app.get('/total-revenue/:providerId', async (req, res) => {
+  try {
+    const { providerId } = req.params;
+
+    const requests = await Request.find({
+      providerId,
+      state: 'done',
+      paid: true
+    });
+
+    const totalRevenue = requests.reduce((sum, req) => sum + (req.price || 0), 0);
+
+    res.json({ success: true, totalRevenue });
+  } catch (err) {
+    console.error("Error calculating total revenue:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+//Fetch revenues by month
+app.get("/monthly-revenue/:providerId", async (req, res) => {
+  try {
+    const { providerId } = req.params;
+
+    const monthlyData = await Request.aggregate([
+      {
+        $match: {
+          providerId,
+          state: "done",
+          paid: true,
+        },
+      },
+      {
+        $group: {
+          _id: { $month: "$date" },
+          total: { $sum: "$price" },
+        },
+      },
+      {
+        $sort: { _id: 1 }, // Jan to Dec
+      },
+    ]);
+
+    // Convert numeric months to month names
+    const monthNames = [
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    ];
+
+    const result = monthNames.map((name, index) => {
+      const found = monthlyData.find((m) => m._id === index + 1);
+      return {
+        month: name,
+        total: found ? found.total : 0,
+      };
+    });
+
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error("Error getting monthly revenue:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
 
 
 
@@ -1109,7 +1223,7 @@ app.post('/reviews/existence', async (req, res) => {
 
 
 // ======================
-// Updated Chat Endpoints
+// Chat Endpoints
 // ======================
 
 // Middleware to check chat participation
@@ -1460,7 +1574,7 @@ app.get('/user/:id', async (req, res) => {
   }
 });
 
-// server.js
+//Check if chat exists
 app.get('/chats/existing', async (req, res) => {
   try {
     const { customerId, providerId } = req.query;
@@ -1693,7 +1807,6 @@ io.on('connection', (socket) => {
   });
 });
 
-// Change server startup to use socket server
 
 
 // ======================

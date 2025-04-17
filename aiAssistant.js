@@ -385,6 +385,7 @@ if (
   msg.includes("new request") ||
   msg.includes("book a service") ||
   msg.includes("i want to book") ||
+  msg.includes("i want to create a request") ||
   msg.includes("service request")
 ) {
   userIntentState.set(email, { step: "awaiting_category" });
