@@ -15,6 +15,11 @@ import mongoose from 'mongoose';
 const userIntentState = new Map();
 
 
+//For Random responses
+const randomResponse = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+
+
 export const setupAIAssistant = (app) => {
   app.post("/ask-ai", async (req, res) => {
     const { message, email } = req.body;
@@ -281,14 +286,27 @@ function getRelevantChunks(query, topN = 3) {
       // 1. Completed jobs
       if (msg.includes("how many") && msg.includes("jobs")) {
         const done = await Request.countDocuments({ providerId, state: "done" });
-        return res.json({ message: `You've completed ${done} job(s).` });
+        return res.json({
+          message: randomResponse([
+            `🎉 Nice! You've completed ${done} job${done !== 1 ? 's' : ''} so far.`,
+            `💼 That's ${done} job${done !== 1 ? 's' : ''} in the bag. Keep it up!`,
+            `👏 Impressive — ${done} completed and counting!`
+          ])
+        });
+        
       }
 
       // 2. Total revenue
       if (msg.includes("total revenue")) {
         const jobs = await Request.find({ providerId, paid: true });
         const total = jobs.reduce((acc, job) => acc + (job.price || 0), 0);
-        return res.json({ message: `Your total revenue is AED ${total.toFixed(2)}.` });
+        return res.json({
+          message: randomResponse([
+            `💰 You've earned a total of AED ${total.toFixed(2)} — great job!`,
+            `🔥 AED ${total.toFixed(2)} in revenue! Keep the momentum going.`,
+            `💸 That's AED ${total.toFixed(2)} you've made. Hustle pays off!`
+          ])
+        });
       }
 
       // 3. Average rating
@@ -377,39 +395,171 @@ function getRelevantChunks(query, topN = 3) {
 // AI ACTION FUNCTIONS (CREATE / UPDATE / CANCEL / NOTIFY)
 
 
+const classifyIntent = async (message) => {
+  const prompt = `
+Classify the intent of the user's message below into one of the following categories:
+
+- create_request
+- view_requests
+- ask_provider_info
+- update_name
+- send_message
+- cancel_request
+- complete_payment
+- submit_bid
+- mark_done
+- ask_general_question
+
+User Message: "${message}"
+
+Reply ONLY with one of the category keywords above. Do not explain.
+`;
+
+  const response = await axios.post(
+    "https://openrouter.ai/api/v1/chat/completions",
+    {
+      model: "openai/gpt-3.5-turbo",
+      messages: [{ role: "user", content: prompt }]
+    },
+    {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`
+      }
+    }
+  );
+
+  return response.data.choices?.[0]?.message?.content.trim();
+};
+
+//Extract Category 
+
+const extractCategory = async (message, categories) => {
+  const prompt = `
+Extract the most relevant service category from the message below. 
+Only choose from the following categories:
+
+${categories.map(cat => `- ${cat}`).join("\n")}
+
+If the category is unclear or not mentioned, reply with "none".
+
+Message: "${message}"
+
+Respond ONLY with a category name from the list or "none".
+`;
+
+  const res = await axios.post(
+    "https://openrouter.ai/api/v1/chat/completions",
+    {
+      model: "openai/gpt-3.5-turbo",
+      messages: [{ role: "user", content: prompt }]
+    },
+    {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`
+      }
+    }
+  );
+
+  return res.data.choices?.[0]?.message?.content.trim();
+};
+
+
 // 1. Create a new service request (customer)
 
 // STEP 1: Start request
-if (
+const intent = await classifyIntent(msg);
+const isCreateIntent =
+  intent === "create_request" ||
   msg.includes("create request") ||
   msg.includes("new request") ||
-  msg.includes("book a service") ||
-  msg.includes("i want to book") ||
-  msg.includes("i want to create a request") ||
-  msg.includes("service request")
-) {
-  userIntentState.set(email, { step: "awaiting_category" });
-
-  const services = await Services.find({});
-  const categories = [...new Set(services.map(s => s.category))];
-
-  return res.json({
-    message: `Great! Let's get started. Please choose a category:\n\n` +
-      categories.map(cat => `• ${cat}`).join("\n")
-  });
-}
-
+  msg.includes("book a service");
+  if (isCreateIntent) {
+    const allServices = await Services.find({});
+    const categories = [...new Set(allServices.map(s => s.category))];
+    const matchedCategory = await extractCategory(message, categories);
+  
+    if (matchedCategory && matchedCategory !== "none") {
+      userIntentState.set(email, { step: "awaiting_service", selectedCategory: matchedCategory });
+  
+      if (matchedCategory.toLowerCase().includes("auto")) {
+        userIntentState.set(email, { step: "awaiting_car_type", selectedCategory: matchedCategory });
+  
+        const carTypes = ["Sedan", "SUV", "Hatchback", "Coupe", "Convertible", "Pickup", "Van"];
+        return res.json({
+          message:
+            `🚗 Sweet wheels! What kind of ride do you have?\n\n` +
+            carTypes.map(c => `👉 ${c}`).join("   ")
+        });
+      }
+  
+      if (matchedCategory.toLowerCase().includes("plumbing")) {
+        return res.json({
+          message:
+            `🚿 Got plumbing issues? Choose from below:\n\n` +
+            `🛁 Bathroom:\n🔧 Toilet Repair   🚿 Shower Install   🚰 Faucet Replace   🚽 Bidet Spray\n\n` +
+            `🍽️ Kitchen:\n🧼 Sink Fix   🌀 Washing Machine   💧 Water Filter\n\n` +
+            `🛠️ General:\n💦 Leak Fix   🔄 Drain Clean   🔧 Pipe Work   🔋 Water Pump   🔥 Heater Repair`
+        });
+      }
+  
+      if (matchedCategory.toLowerCase().includes("home cleaning")) {
+        return res.json({
+          message:
+            `🧹 Sure! Pick your preferred cleaning style:\n\n` +
+            "✨ Regular   🧼 Deep   📦 Move-in/Out   🛠️ Post-renovation"
+        });
+      }
+  
+      if (matchedCategory.toLowerCase().includes("painting")) {
+        return res.json({
+          message:
+            `🎨 What area needs painting?\n\n` +
+            `🖼️ Interior   ⬆️ Ceilings   🧱 Exterior   🚪 Doors   ✨ Touch-ups   🏚️ Full Renovation`
+        });
+      }
+  
+      if (matchedCategory.toLowerCase().includes("laundry")) {
+        return res.json({
+          message:
+            `🧺 Laundry time! Choose what you need:\n\n` +
+            `🧼 Cleaning   🔥 Ironing   🧴 Dry Cleaning`
+        });
+      }
+  
+      if (!matchedCategory || matchedCategory === "none") {
+        return res.json({
+          message: "Sorry, I couldn't detect the category. Please choose one:\n\n" +
+            categories.map(cat => `• ${cat}`).join("\n")
+        });
+      }
+      // fallback to default subservice picker
+      const servicesInCategory = allServices.filter(s => s.category === matchedCategory);
+      return res.json({
+        message: `Perfect! Please select a service under "${matchedCategory}":\n\n` +
+          servicesInCategory.map(s => `• ${s.name}`).join("\n")
+      });
+    }
+  
+    // No category detected — fallback to manual step
+    userIntentState.set(email, { step: "awaiting_category" });
+  
+    return res.json({
+      message: `Great! Let's get started. Please choose a category:\n\n` +
+        categories.map(cat => `• ${cat}`).join("\n")
+    });
+  }
 // STEP 2: Category selection
 if (userState?.step === "awaiting_category") {
   const allServices = await Services.find({});
   const categories = [...new Set(allServices.map(s => s.category))];
-  const input = message.trim().toLowerCase();
 
-  const matchedCategory = categories.find(cat => cat.toLowerCase() === input);
+  const matchedCategory = await extractCategory(message, categories);
 
-  if (!matchedCategory) {
+  if (!matchedCategory || matchedCategory === "none") {
     return res.json({
-      message: "Sorry, I couldn't find that category. Please choose from:\n\n" +
+      message: "Sorry, I couldn't detect the category. Please choose one:\n\n" +
         categories.map(cat => `• ${cat}`).join("\n")
     });
   }
@@ -466,42 +616,99 @@ if (userState?.step === "awaiting_category") {
 
 // STEP 3-A: Car Type
 if (userState?.step === "awaiting_car_type") {
-  const validCarTypes = ["sedan", "suv", "hatchback", "coupe", "convertible", "pickup", "van"];
-  const input = message.trim().toLowerCase();
+  const carTypes = ["Sedan", "SUV", "Hatchback", "Coupe", "Convertible", "Pickup", "Van"];
 
-  if (!validCarTypes.includes(input)) {
+  const prompt = `
+A user is describing their car. Extract the most likely car type based on what they say.
+
+Choose only from this list:
+${carTypes.map(c => `- ${c}`).join("\n")}
+
+If the car type isn't obvious or cannot be confidently matched, return "none".
+
+User said: "${message}"
+
+Respond ONLY with the car type or "none".
+`;
+
+  const aiResponse = await axios.post(
+    "https://openrouter.ai/api/v1/chat/completions",
+    {
+      model: "openai/gpt-3.5-turbo",
+      messages: [{ role: "user", content: prompt }]
+    },
+    {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`
+      }
+    }
+  );
+
+  const carTypeRaw = aiResponse.data.choices?.[0]?.message?.content?.trim();
+  const extractedCarType = carTypes.find(ct => ct.toLowerCase() === carTypeRaw?.toLowerCase());
+
+  if (!extractedCarType) {
     return res.json({
-      message: "Please choose a valid car type:\n\n" + validCarTypes.map(c => `• ${c[0].toUpperCase() + c.slice(1)}`).join("\n")
+      message: "Hmm, I didn’t quite get your car type. Can you rephrase or choose one of these?\n\n" +
+        carTypes.map(c => `• ${c}`).join("\n")
     });
   }
 
   userIntentState.set(email, {
     ...userState,
     step: "awaiting_service",
-    selectedCarType: input[0].toUpperCase() + input.slice(1)
+    selectedCarType: extractedCarType
   });
 
   return res.json({
-    message: "What service do you need?\n\n" +
+    message: `Got it! A ${extractedCarType}. Now, what service do you need?\n\n` +
       "🔧 Engine & Maintenance:\n• Brake Repair & Replacement\n• Engine Diagnostics & Repair\n• Transmission Repair\n• Oil Change Service\n\n" +
       "🧼 Exterior & Interior:\n• Car Wash & Detailing\n• Car Painting & Scratch Removal\n• Windshield Repair & Replacement\n\n" +
       "⚡ Electrical & Cooling:\n• Car AC Repair & Refill\n• Wiring Check\n• Battery Replacement\n• Light Replacement"
   });
 }
 
-// STEP 3-B: Service Selection
+// STEP 3-B: Service Selection (using GPT to match)
 if (userState?.step === "awaiting_service") {
   const selectedCategory = userState.selectedCategory;
   const servicesInCategory = await Services.find({ category: selectedCategory });
+  const serviceNames = servicesInCategory.map(s => s.name);
 
-  const input = message.trim().toLowerCase();
+  const prompt = `
+You're helping a user book a service in the "${selectedCategory}" category.
+Your job is to identify the best matching service name from the list below, based on what they said.
+
+Service Options:
+${serviceNames.map(s => `- ${s}`).join("\n")}
+
+User said: "${message}"
+
+Reply ONLY with one exact match from the list above, or "none" if nothing matches well.
+`;
+
+  const gptRes = await axios.post(
+    "https://openrouter.ai/api/v1/chat/completions",
+    {
+      model: "openai/gpt-3.5-turbo",
+      messages: [{ role: "user", content: prompt }]
+    },
+    {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`
+      }
+    }
+  );
+
+  const selectedServiceRaw = gptRes.data.choices?.[0]?.message?.content?.trim();
   const matchedService = servicesInCategory.find(
-    s => s.name.toLowerCase().includes(input) || input.includes(s.name.toLowerCase())
+    s => s.name.toLowerCase() === selectedServiceRaw?.toLowerCase()
   );
 
   if (!matchedService) {
     return res.json({
-      message: `Sorry, I couldn't find that service in "${selectedCategory}". Please choose from:\n\n` +
+      message: `Hmm, I couldn’t find a match in "${selectedCategory}". Can you pick one of these?\n\n` +
         servicesInCategory.map(s => `• ${s.name}`).join("\n")
     });
   }
@@ -517,10 +724,52 @@ if (userState?.step === "awaiting_service") {
   });
 }
 
-// STEP 4: Date
+// STEP 4: Date (with natural language support)
 if (userState?.step === "awaiting_date") {
-  const parsedDate = new Date(message.trim());
-  if (isNaN(parsedDate.getTime()) || parsedDate < new Date()) {
+  const today = new Date();
+
+  // First, try direct parsing
+  let parsedDate = new Date(message.trim());
+
+  // If it's not valid or unclear, use GPT to extract
+  if (isNaN(parsedDate.getTime()) || parsedDate < today) {
+    const prompt = `
+You're helping a user schedule a service. Today's date is ${today.toDateString()}.
+
+They said: "${message}"
+
+Extract a valid future date in YYYY-MM-DD format from their message.
+If the date is unclear or invalid, reply with "none".
+
+Only reply with the date string or "none".
+`;
+
+    const aiRes = await axios.post(
+      "https://openrouter.ai/api/v1/chat/completions",
+      {
+        model: "openai/gpt-3.5-turbo",
+        messages: [{ role: "user", content: prompt }]
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`
+        }
+      }
+    );
+
+    const extractedDateStr = aiRes.data.choices?.[0]?.message?.content?.trim();
+
+    if (!extractedDateStr || extractedDateStr.toLowerCase() === "none") {
+      return res.json({
+        message: "I couldn’t understand the date. Please enter a valid future date (e.g., 2025-04-20 or 'next Friday')."
+      });
+    }
+
+    parsedDate = new Date(extractedDateStr);
+  }
+
+  if (isNaN(parsedDate.getTime()) || parsedDate < today) {
     return res.json({ message: "Please enter a valid future date (e.g., 2025-04-20)." });
   }
 
@@ -532,12 +781,42 @@ if (userState?.step === "awaiting_date") {
 
   return res.json({ message: "Got it! What's your budget for this service? (in AED)" });
 }
-
-// STEP 5: Budget
+// STEP 5: Budget (with natural language understanding)
 if (userState?.step === "awaiting_budget") {
-  const budget = parseFloat(message.trim());
+  let budget = parseFloat(message.trim());
+
+  // If input isn't a clean number, use GPT to extract a budget value
   if (isNaN(budget) || budget <= 0) {
-    return res.json({ message: "Please enter a valid numeric budget in AED." });
+    const prompt = `
+You're helping a user provide their budget for a service.
+
+They said: "${message}"
+
+Extract the most reasonable **single number** in AED that represents their intended budget.
+Only reply with the number (e.g., 250). If unclear, reply with "none".
+`;
+
+    const aiRes = await axios.post(
+      "https://openrouter.ai/api/v1/chat/completions",
+      {
+        model: "openai/gpt-3.5-turbo",
+        messages: [{ role: "user", content: prompt }]
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`
+        }
+      }
+    );
+
+    const extracted = aiRes.data.choices?.[0]?.message?.content?.trim();
+
+    budget = parseFloat(extracted);
+  }
+
+  if (isNaN(budget) || budget <= 0) {
+    return res.json({ message: "I couldn’t understand your budget. Please enter a valid amount in AED (e.g., 150)." });
   }
 
   userIntentState.set(email, {
@@ -549,8 +828,31 @@ if (userState?.step === "awaiting_budget") {
   return res.json({ message: "Almost done! Please add a short note or description for the provider." });
 }
 
-// STEP 6: Description & Create
+// STEP 6: Description
 if (userState?.step === "awaiting_description") {
+  userIntentState.set(email, {
+    ...userState,
+    step: "awaiting_location",
+    description: message.trim()
+  });
+
+  return res.json({
+    message: `📍 Almost there! Please share your location coordinates so the provider can reach you.\n\nFormat:\nlatitude, longitude\n\nExample: 24.4539, 54.3773`
+  });
+}
+
+
+
+// STEP 7: Location
+if (userState?.step === "awaiting_location") {
+  const [latStr, lngStr] = message.trim().split(',').map(s => s.trim());
+  const latitude = parseFloat(latStr);
+  const longitude = parseFloat(lngStr);
+
+  if (isNaN(latitude) || isNaN(longitude)) {
+    return res.json({ message: "❌ Invalid format. Please enter your location as:\n24.4539, 54.3773" });
+  }
+
   let details = {};
   const category = userState.selectedCategory;
   const lowerCat = category.toLowerCase();
@@ -595,9 +897,10 @@ if (userState?.step === "awaiting_description") {
     customerID: customerId,
     service: category,
     category,
-    description: message.trim(),
+    description: userState.description,
     budget: userState.selectedBudget,
     date: userState.selectedDate,
+    location: { latitude, longitude },
     state: "in-progress",
     details
   });
@@ -605,7 +908,7 @@ if (userState?.step === "awaiting_description") {
   userIntentState.delete(email);
 
   return res.json({
-    message: `✅ Your request for "${newRequest.service}" on ${newRequest.date.toLocaleDateString()} has been created successfully!`
+    message: `✅ Your request for "${newRequest.service}" on ${newRequest.date.toLocaleDateString()} has been created with location: ${latitude}, ${longitude}.`
   });
 }
 
@@ -614,21 +917,20 @@ if (userState?.step === "awaiting_description") {
 
 
 
+
+
 // 2. Submit a bid on a request (provider)
 // Provider wants to place a bid
-if (
-  msg.includes("submit bid") ||
-  msg.includes("place a bid") ||
-  msg.includes("send my bid") ||
-  msg.includes("bid on request")
-) {
+// Step: Detect bid intent naturally using GPT
+
+if (intent === "submit_bid") {
   const latestRequest = await Request.findOne({ state: "in-progress", providerId: null }).sort({ createdAt: -1 });
 
   if (!latestRequest) {
     return res.json({ message: "🚫 No service requests are currently open for bidding. Please check again later." });
   }
 
-  // Save request state in memory to await bid input
+  // Save state for upcoming bid amount
   userIntentState.set(email, {
     step: "awaiting_bid_amount",
     targetRequestId: latestRequest._id
@@ -645,7 +947,7 @@ if (
   });
 }
 
-// Provider submits a bid amount
+// Step: Provider submits bid amount
 if (userState?.step === "awaiting_bid_amount") {
   const amount = parseFloat(message.trim());
 
@@ -670,7 +972,11 @@ if (userState?.step === "awaiting_bid_amount") {
   userIntentState.delete(email);
 
   return res.json({
-    message: `✅ Your bid of AED ${amount} has been successfully submitted for "${request.service}" scheduled on ${request.date.toLocaleDateString()}.`
+    message: randomResponse([
+      `📨 Your AED ${amount} bid on "${request.service}" (for ${request.date.toLocaleDateString()}) is in! Let's hope they pick you 🔧`,
+      `🚀 Bid placed: AED ${amount} for ${request.service}. Fingers crossed!`,
+      `✅ Nice! You've submitted a bid of AED ${amount}. We'll let you know if it's accepted.`
+    ])
   });
 }
 
@@ -746,8 +1052,13 @@ if (
   txn.status = "complete";
   await txn.save();
   await Request.findByIdAndUpdate(txn.requestId, { paid: true });
-  return res.json({ message: `Payment for AED ${txn.amount} marked as complete.` });
-}
+  return res.json({
+    message: randomResponse([
+      `✅ Payment of AED ${txn.amount} confirmed. Thanks for using ServiBid!`,
+      `💳 Got it! AED ${txn.amount} payment marked as done.`,
+      `🎉 Payment completed — AED ${txn.amount} is all set!`
+    ])
+  });}
 
 // 6. Cancel request
 if (
@@ -987,7 +1298,7 @@ if (customer) {
       ? `You are an AI assistant for the ServiBid app.
 
 Only answer using the following knowledge base. If unsure, say:
-"I don't have that information currently. Please contact servibid1@gmail.com."
+"I don't have that information currently. Please contact support@servibid.tech."
 
 Knowledge Base:
 ${retrievedChunks.join("\n\n")}`
