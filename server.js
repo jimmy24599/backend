@@ -434,9 +434,7 @@ app.get("/requests/:customerID", async (req, res) => {
 
   try {
     const requests = await Request.find({ customerID });
-    if (!requests.length) {
-      return res.status(404).json({ success: false, message: "No requests found for this customer." });
-    }
+    
     res.status(200).json({ success: true, data: requests });
   } catch (error) {
     console.error("Error fetching requests:", error.message);
