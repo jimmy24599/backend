@@ -52,7 +52,7 @@ import { sendEmail } from './email.js';
 
 
 const app = express();
-app.use(compression()); // ✅ Reduces response size
+app.use(compression()); // Reduces response size
 const server = http.createServer(app); // assuming 'app' is your Express app
 const io = new Server(server, {
   cors: {
@@ -737,11 +737,9 @@ app.get("/requests-by-provider/:providerId", async (req, res) => {
 
   try {
     const requests = await Request.find({ providerId })
-      .populate("customerID"); // ✅ ADD THIS
+      .populate("customerID"); // ADD THIS
 
-    if (!requests.length) {
-      return res.status(404).json({ success: false, message: "No active requests found for this provider." });
-    }
+  
 
     res.status(200).json({ success: true, data: requests });
   } catch (error) {
@@ -1007,8 +1005,8 @@ app.put("/requests/:id", async (req, res) => {
     if (providerId !== undefined) updateData.providerId = providerId;
     if (providerId !== undefined) updateData.paid = false;
     if (reviewId !== undefined) updateData.reviewId = reviewId;
-    if (image !== undefined) updateData.image = image; // ✅ add this
-
+    if (image !== undefined) updateData.image = image; 
+    
     const updatedRequest = await Request.findByIdAndUpdate(
       req.params.id,
       updateData,
@@ -1490,13 +1488,13 @@ app.post('/chats/:chatId/messages', isParticipant, async (req, res) => {
 // Get chat messages
 app.get('/chats/:chatId/messages', isParticipant, async (req, res) => {
   try {
-    // ✅ Fetch the chat from DB first
+    //  Fetch the chat from DB first
     const chat = await Chat.findById(req.params.chatId);
     if (!chat) {
       return res.status(404).json({ success: false, message: 'Chat not found' });
     }
 
-    // ✅ Fetch messages for this chat
+    //  Fetch messages for this chat
     const messages = await Message.find({ chatId: req.params.chatId })
       .sort({ createdAt: 1 })
       .lean();
